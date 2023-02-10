@@ -7,6 +7,7 @@ import re
 import time
 from optparse import OptionParser
 from pyutilb.util import read_init_file_meta
+from pyutilb import log
 from m3u8dwn.down import down_m3u8_video, parse_m3u8_url
 
 # 解析命令的选项与参数
@@ -64,6 +65,7 @@ def main():
     concurrency = option.concurrency
     if concurrency == None:
         concurrency = 200
+    concurrency = int(concurrency)
 
     # 1 多网页
     if option.webpagerange != None:
@@ -74,14 +76,14 @@ def main():
             raise Exception("ps选项没有指定范围表达式")
         start = int(mat.group(1))
         end = int(mat.group(2))
-        print(f"要下载{end-start+1}个网页的视频")
+        log.debug(f"要下载{end-start+1}个网页的视频")
         for i in range(start, end+1):
             real_url = url.replace(mat.group(), str(i))
             # 解析网页中的m3u8 url
             m3u8_url, file = parse_m3u8_url(real_url)
             # 下载m3u8视频
             down_m3u8_video(m3u8_url, output, file, concurrency)
-            print("----------\n 准备下载下一个网页视频 ")
+            log.debug("----------\n 准备下载下一个网页视频 ")
             time.sleep(5)
         return
 
