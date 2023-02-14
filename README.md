@@ -44,7 +44,9 @@ m3u8dwn -m m3u8地址 -p 内含m3u8地址的网页地址 -r 网页地址范围 -
 
 `-f`可省, 为输出文件名, 默认是网页标题.mp4或result.mp4;
 
-`-c`可省, 默认并发下载数为200
+`-c`可省, 为并发下载数, 默认为200
+
+`-t`可省, 为重试次数, 默认为2
 
 2.2 例子
 ```
@@ -62,4 +64,7 @@ m3u8dwn -r http://xxx.com/yyy-[1:3].html
 
 # -c指定并发下载数为150
 m3u8dwn -m http://xxx.com/yyy.m3u8 -c 150
+
+# -t指定重试次数为3
+m3u8dwn -m http://xxx.com/yyy.m3u8 -t 3
 ```

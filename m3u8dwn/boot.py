@@ -30,6 +30,7 @@ def parse_cmd(name, version):
     optParser.add_option("-o", "--o", dest="output", type="string", help="output directory") # 输出目录, 默认为当前目录
     optParser.add_option("-f", "--f", dest="filename", type="string", help="output filename") # 输出文件名, 默认是网页标题.mp4或result.mp4
     optParser.add_option("-c", "--c", dest="concurrency", type="string", help="download concurrency, default 200") # 并发数，就是单批次并发下载ts分片数
+    optParser.add_option("-t", "--t", dest="tries", type="string", help="max try times, default 2") # 重试次数
 
     # 解析选项
     option, args = optParser.parse_args(args)
@@ -68,6 +69,12 @@ def main():
         concurrency = 200
     concurrency = int(concurrency)
 
+    # 获得尝试次数
+    tries = option.tries
+    if tries == None:
+        tries = 2
+    tries = int(tries)
+
     # 1 多网页
     if option.webpagerange != None:
         url = option.webpagerange
@@ -83,7 +90,7 @@ def main():
             # 解析网页中的m3u8 url
             m3u8_url, file = parse_m3u8_url(real_url)
             # 下载m3u8视频
-            down_m3u8_video(m3u8_url, output, file, concurrency)
+            down_m3u8_video(m3u8_url, output, file, concurrency, tries)
             log.debug("----------\n 准备下载下一个网页视频 ")
             time.sleep(5)
         return
@@ -96,7 +103,7 @@ def main():
         m3u8_url, file = parse_m3u8_url(option.webpage)
 
     # 下载m3u8视频
-    down_m3u8_video(m3u8_url, output, file, concurrency)
+    down_m3u8_video(m3u8_url, output, file, concurrency, tries)
 
 if __name__ == '__main__':
     main()

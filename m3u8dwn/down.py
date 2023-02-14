@@ -241,12 +241,15 @@ def check_down_ts_done(down_path, ts_num):
     return len(files) == ts_num
 
 # 下载，获取m3u8文件，读出ts链接，并写入文档
-def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency = 200):
+# :param concurrency 并发下载数
+# :param retries 尝试次数
+def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency = 200, tries = 2):
     # 检查是否下载过
     if result_filename != None and os.path.exists(down_path + '/' + result_filename):
         log.debug(f"已下载过{result_filename}: 跳过")
         return
 
+    log.debug(f"开始下载{result_filename}")
     # 准备下载目录
     # 每个电影建一个子目录，防止多个电影的ts分片文件混在一起
     down_path = down_path + '/' + get_ts_subdir(url)
@@ -267,18 +270,17 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
     ts_list = get_ts_list(video)
 
     # 4 下载
-    retry_num = 0 # 重试次数
     begin = time.time()
 
     # bug: 由于分片太多，全部并发下载的话，会导致后端处理不过来，导致很多请求中断，只下载了一半
     # 旧代码: batch_download_ts(segs, url, down_path, aes)
     # fix: 每次只并发200分片，见参数concurrency
-    while retry_num < 2 and not check_down_ts_done(down_path, na): # 如果ts文件未下载完，则重试，最多试2次
-        retry_num += 1
+    while tries > 0 and not check_down_ts_done(down_path, na): # 如果ts文件未下载完，则重试，最多试2次
+        tries -= 1
         segs = get_downing_segs(video, down_path)
         n = len(segs)  # 要下载的ts分片数
         round = math.ceil(n / concurrency)
-        log.debug(f"第{retry_num}次尝试: 要下载{n}个ts分片文件, 分{round}批下载, 每批并发下载{concurrency}个分片")
+        log.debug(f"第{tries}次尝试: 要下载{n}个ts分片文件, 分{round}批下载, 每批并发下载{concurrency}个分片")
         for start in range(0, n, concurrency):
             log.debug(f"第{int(start/concurrency)+1}批下载")
             end = min(start + concurrency, n)
@@ -289,7 +291,6 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
 
     times = time.time() - begin  # 记录完成时间
     log.debug(f"下载耗时: {times} s")
-
 
 # 批量异步下载ts文件，并等待下载完成
 # :param down_url ts文件地址
