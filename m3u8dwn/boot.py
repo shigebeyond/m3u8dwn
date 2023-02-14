@@ -60,6 +60,7 @@ def main():
         output = os.getcwd() # 当前目录
     elif not os.path.isabs(output):
         output = os.path.abspath(output) # 绝对路径
+    log.debug(f"下载目录为: {output}")
 
     # 获得并发数，就是单批次并发下载ts分片数
     concurrency = option.concurrency

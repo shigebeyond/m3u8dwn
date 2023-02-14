@@ -23,6 +23,7 @@ import asyncio
 import httpx
 from pyutilb import log
 from asyncio import coroutines
+from urllib.parse import urlparse
 
 timeout = 50
 client = httpx.AsyncClient(verify=False, timeout=timeout) # 异步http client
@@ -69,6 +70,7 @@ def do_load_m3u8(url):
         log.debug(f"先下载m3u8后解析: {url}")
         # 支持重定向
         res = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+        check_response(res)
         video = m3u8.loads(res.text, url)
         if video.base_uri == None:
             video.base_uri = url.rsplit("/", 1)[0] + "/"
@@ -84,12 +86,18 @@ def get_key(keystr, url):
     quotation_mark_pos = keyinfo.rfind('"')
     key_url = keyinfo[uri_pos:quotation_mark_pos].split('"')[1]
     if is_url(key_url) == False:
-        key_url = url.rsplit("/", 1)[0] + "/" + key_url
+        key_url = fix_ts_url(key_url, url)
     res = httpx.get(key_url, headers=headers)
+    check_response(res)
     key = res.content
-    log.debug('解析key: ', method, key)
-    # log.debug(key.decode('utf-8'))
+    log.debug('解析method=%s, key=%s', method, key.decode('utf-8'))
     return method, key
+
+# 检查响应
+def check_response(res):
+    if res.status_code != 200:
+        url = res.request.url
+        raise Exception(f'请求失败, 响应码为{res.status_code}, url为 {url}')
 
 # 构建aes加密器
 def build_aes(url, video):
@@ -104,18 +112,66 @@ def get_ts_subdir(url):
     m = hashlib.md5(url.encode(encoding='utf-8'))
     return m.hexdigest()  # 转化为16进制
 
+# 从下载ts地址中获得文件名
+# :param down_url ts地址，可能是绝对地址，也可能是相对地址，也可能仅是文件名
+def get_ts_filename(ts_url):
+    # 1 url
+    if is_url(ts_url):
+        return ts_url.rsplit("/", 1)[1]
+
+    # 2 相对地址：目录+文件名, 如/a/b/c.ts
+    if '/' in ts_url: # 相对uri
+        return ts_url.split("/")[-1]
+
+    # 3 纯文件名, 如c.ts
+    return ts_url
+
+# 获得ts文件名顺序，用于指导有序合并
+def get_ts_list(video):
+    ts_list = []
+    for seg in video.segments:
+        filename = get_ts_filename(seg.uri) # ts文件名
+        ts_list.append(filename)
+    return ts_list
+
+# 获得要下载的分片，去掉下载过的
+def get_downing_segs(video, down_path):
+    segs = [] # 去掉下载过的分片
+    for seg in video.segments:
+        filename = get_ts_filename(seg.uri)
+        # 去掉下载过的分片
+        if not os.path.exists(down_path + "/" + filename):
+            segs.append(seg)
+    return segs
+
+# 修正ts下载地址
+# :param down_url ts地址，可能是绝对地址，也可能是相对地址，也可能仅是文件名
+def fix_ts_url(ts_url, m3u8_url):
+    # 1 url
+    if is_url(ts_url):
+        return ts_url
+
+    # 2 相对地址：目录+文件名, 如/a/b/c.ts
+    if '/' in ts_url:
+        # 获得域名
+        parts = urlparse(m3u8_url)
+        domain = parts.scheme + '://' + parts.netloc
+        # 域名+相对uri
+        return domain + ts_url
+
+    # 3 纯文件名, 如c.ts
+    return m3u8_url.rsplit("/", 1)[0] + "/" + ts_url
+
 # 下载ts分片文件 -- 异步下载，提高并发下载能力
 # :param down_url ts文件地址
-# :param url *.m3u8文件地址
+# :param url m3u8文件地址
 # :param down_path 下载地址
 # :param aes aes加密器，为null则不加密
-async def download_ts(down_url, url, down_path, aes):
+async def download_ts(ts_url, m3u8_url, down_path, aes):
     # 文件名
-    if is_url(down_url) == False:
-        filename = down_url
-        down_url = url.rsplit("/", 1)[0] + "/" + down_url
-    else:
-        filename = down_url.rsplit("/", 1)[1]
+    filename = get_ts_filename(ts_url)
+    # 修正下载地址
+    ts_url = fix_ts_url(ts_url, m3u8_url)
 
     # 文件路径
     down_ts_path = down_path + "/" + filename
@@ -124,11 +180,12 @@ async def download_ts(down_url, url, down_path, aes):
         log.debug(f'已下载过{filename}, 跳过')
         return
 
-    log.debug(f'开始下载{filename}')
+    log.debug(f'开始下载{filename}: {ts_url}')
     #res = await client.get(down_url, headers=headers)
     # res = client.stream('GET', down_url, headers=headers) # 流式处理 -- 异步的，不能同步调用
     try:
-        async with client.stream('GET', down_url, headers=headers) as res:
+        async with client.stream('GET', ts_url, headers=headers) as res:
+            check_response(res)
             if aes != None:
                 log.debug(f'结束下载+解密{filename}')
             else:
@@ -142,7 +199,7 @@ async def download_ts(down_url, url, down_path, aes):
                             chunk = aes.decrypt(chunk)
                         file.write(chunk)
     except Exception as e:
-        log.error(f"下载{down_url}失败，需重新下载: {e}")
+        log.error(f"下载{ts_url}失败，需重新下载: {e}")
         # 删除旧文件, 可能只下载了一半
         if os.path.exists(down_ts_path):
             os.remove(down_ts_path)
@@ -158,12 +215,16 @@ def fill_ciphertext(chunk):
 # 合并ts文件
 # dest_file:合成文件名
 # source_path:ts文件目录
-# ts_list:文件列表
+# ts_list:文件列表，用于指导有序合并
 # delete:合成结束是否删除ts文件
 def merge_to_mp4(dest_file, down_path, ts_list, delete=False):
+    if not check_down_ts_done(down_path, len(ts_list)):
+        raise Exception("ts分片文件未下载完")
+
     log.debug(f'合并到{dest_file}')
     dest_file = down_path + "/../" + dest_file
     with open(dest_file, 'wb') as fw:
+        # 按顺序合并ts，不然合并的视频是错乱的
         for ts_file in ts_list:
             ts_file = down_path + "/" + ts_file
             with open(ts_file, 'rb') as fr:
@@ -194,44 +255,41 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
 
     # 1 加载m3u8
     video = load_m3u8(url)
-    n = len(video.segments) # ts分片数
-    if n == 0:
+    na = len(video.segments)
+    if na == 0:
         log.error(f"ts分片数为0，无法下载")
         return
-    log.debug(f"要下载 {n} 个ts分片文件")
 
     # 2 构建aes加密器，为null则不加密
     aes = build_aes(url, video)
 
-    # 3 记录ts文件名，用于指导合并
-    ts_list = []
-    for seg in video.segments:
-        if is_url(seg.uri):
-            ts_list.append(seg.uri.rsplit("/", 1)[1])
-        else:
-            ts_list.append(seg.uri)
+    # 3 记录ts文件名顺序，用于指导有序合并
+    ts_list = get_ts_list(video)
 
     # 4 下载
     retry_num = 0 # 重试次数
     begin = time.time()
 
     # bug: 由于分片太多，全部并发下载的话，会导致后端处理不过来，导致很多请求中断，只下载了一半
-    # 旧代码: batch_download_ts(video.segments, url, down_path, aes)
+    # 旧代码: batch_download_ts(segs, url, down_path, aes)
     # fix: 每次只并发200分片，见参数concurrency
-    round = math.ceil(n / concurrency)
-    while retry_num < 2 and not check_down_ts_done(down_path, n): # 如果ts文件未下载完，则重试，最多试2次
+    while retry_num < 2 and not check_down_ts_done(down_path, na): # 如果ts文件未下载完，则重试，最多试2次
         retry_num += 1
-        log.debug(f"第{retry_num}次尝试: 分{round}批下载,每批并发下载{concurrency}个分片")
+        segs = get_downing_segs(video, down_path)
+        n = len(segs)  # 要下载的ts分片数
+        round = math.ceil(n / concurrency)
+        log.debug(f"第{retry_num}次尝试: 要下载{n}个ts分片文件, 分{round}批下载, 每批并发下载{concurrency}个分片")
         for start in range(0, n, concurrency):
             log.debug(f"第{int(start/concurrency)+1}批下载")
             end = min(start + concurrency, n)
-            batch_download_ts(video.segments[start:end], url, down_path, aes)
+            batch_download_ts(segs[start:end], url, down_path, aes)
 
-    # 4 合并ts文件
+    # 5 合并ts文件
     merge_to_mp4(result_filename, down_path, ts_list, True)
 
     times = time.time() - begin  # 记录完成时间
     log.debug(f"下载耗时: {times} s")
+
 
 # 批量异步下载ts文件，并等待下载完成
 # :param down_url ts文件地址
@@ -255,6 +313,7 @@ def parse_m3u8_url(page_url, file = None):
     log.debug("解析网页中的m3u8 url: " + page_url)
     # 加载网页
     res = httpx.get(page_url, headers=headers)
+    check_response(res)
     html = res.content.decode("utf-8")
 
     # 解析电影名=网页标签
