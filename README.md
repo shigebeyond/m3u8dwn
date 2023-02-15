@@ -68,3 +68,6 @@ m3u8dwn -m http://xxx.com/yyy.m3u8 -c 150
 # -t指定重试次数为3
 m3u8dwn -m http://xxx.com/yyy.m3u8 -t 3
 ```
+
+2.3 运行效果
+![cmd](img/cmd.png)
