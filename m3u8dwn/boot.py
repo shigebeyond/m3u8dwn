@@ -81,9 +81,11 @@ def main():
         # 找到范围表达式，如[1,3]
         mat = re.search(r'\[(\d+):(\d+)\]', url)
         if mat == None:
-            raise Exception("ps选项没有指定范围表达式")
+            raise Exception("r选项没有指定范围表达式")
         start = int(mat.group(1))
         end = int(mat.group(2))
+        if end < start:
+            raise Exception("r选项中的范围表达式错误，结束值应该大于等于初始值")
         log.debug(f"要下载{end-start+1}个网页的视频")
         for i in range(start, end+1):
             real_url = url.replace(mat.group(), str(i))
