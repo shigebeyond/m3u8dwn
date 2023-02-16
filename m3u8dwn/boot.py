@@ -8,7 +8,7 @@ import time
 from optparse import OptionParser
 from pyutilb.util import read_init_file_meta
 from pyutilb import log
-from m3u8dwn.down import down_m3u8_video, parse_m3u8_url
+from m3u8dwn.down import down_m3u8_video, parse_and_down_m3u8_video
 
 # 解析命令的选项与参数
 # :param name 命令名
@@ -75,7 +75,7 @@ def main():
         tries = 2
     tries = int(tries)
 
-    # 1 多网页
+    # 1 -r网页范围
     if option.webpagerange != None:
         url = option.webpagerange
         # 找到范围表达式，如[1,3]
@@ -89,23 +89,30 @@ def main():
         log.debug(f"要下载{end-start+1}个网页的视频")
         for i in range(start, end+1):
             real_url = url.replace(mat.group(), str(i))
-            # 解析网页中的m3u8 url
-            m3u8_url, file = parse_m3u8_url(real_url)
-            # 下载m3u8视频
-            down_m3u8_video(m3u8_url, output, file, concurrency, tries)
+            # 从网页中解析m3u8地址，并下载视频
+            parse_and_down_m3u8_video(real_url, output, concurrency, tries)
             log.debug("----------\n 准备下载下一个网页视频 ")
             time.sleep(5)
         return
 
-    # 2 单网页或单m3u8
+    # 2 -p网页
     # 解析网页中的m3u8 url
-    m3u8_url = option.m3u8
-    file = 'result.mp4'
-    if m3u8_url == None and option.webpage != None:
-        m3u8_url, file = parse_m3u8_url(option.webpage)
+    if option.webpage != None:
+        page_urls = option.webpage.split(',')
+        for page_url in page_urls:
+            # 从网页中解析m3u8地址，并下载视频
+            parse_and_down_m3u8_video(page_url, output, concurrency, tries)
+            log.debug("----------\n 准备下载下一个网页视频 ")
+            time.sleep(5)
+        return
 
-    # 下载m3u8视频
-    down_m3u8_video(m3u8_url, output, file, concurrency, tries)
+    # 3 -m指定m3u8 url
+    if option.m3u8 != None:
+        # 下载m3u8视频
+        down_m3u8_video(option.m3u8, output, 'result.mp4', concurrency, tries)
+        return
+
+    raise Exception('缺少选项, `-m`与`-p`与`-r`必须是三选一')
 
 if __name__ == '__main__':
     main()

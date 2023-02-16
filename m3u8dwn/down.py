@@ -90,7 +90,9 @@ def get_key(keystr, url):
     res = httpx.get(key_url, headers=headers)
     check_response(res)
     key = res.content
-    log.debug('解析method=%s, key=%s', method, key.decode('utf-8'))
+    #keystr = key.decode('utf-8') # 偶尔会有编码错
+    keystr = key.hex() # 转16进制
+    log.debug('解析method=%s, key=%s', method, keystr)
     return method, key
 
 # 检查响应
@@ -131,6 +133,8 @@ def get_ts_list(video):
     ts_list = []
     for seg in video.segments:
         filename = get_ts_filename(seg.uri) # ts文件名
+        if not filename.endswith('.ts'):
+            raise Exception(f'm3u8中分片文件不是ts类型: {filename}')
         ts_list.append(filename)
     return ts_list
 
@@ -275,12 +279,13 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
     # bug: 由于分片太多，全部并发下载的话，会导致后端处理不过来，导致很多请求中断，只下载了一半
     # 旧代码: batch_download_ts(segs, url, down_path, aes)
     # fix: 每次只并发200分片，见参数concurrency
-    while tries > 0 and not check_down_ts_done(down_path, na): # 如果ts文件未下载完，则重试，最多试2次
-        tries -= 1
+    i = 0
+    while i < tries and not check_down_ts_done(down_path, na): # 如果ts文件未下载完，则重试，最多试2次
+        i += 1
         segs = get_downing_segs(video, down_path)
         n = len(segs)  # 要下载的ts分片数
         round = math.ceil(n / concurrency)
-        log.debug(f"第{tries}次尝试: 要下载{n}个ts分片文件, 分{round}批下载, 每批并发下载{concurrency}个分片")
+        log.debug(f"第{i}次尝试: ts分片文件总数为{na}个, 已下载{na-n}个, 还要下载{n}个, 分{round}批下载, 每批并发下载{concurrency}个分片")
         for start in range(0, n, concurrency):
             log.debug(f"第{int(start/concurrency)+1}批下载")
             end = min(start + concurrency, n)
@@ -308,6 +313,15 @@ def batch_download_ts(segs, url, down_path, aes):
     if len(tasks) > 0:
         # 等待下载任务执行完成
         loop.run_until_complete(asyncio.wait(tasks))
+
+# 从网页中解析m3u8地址，并下载视频
+# :param concurrency 并发下载数
+# :param retries 尝试次数
+def parse_and_down_m3u8_video(page_url, down_path, concurrency, tries):
+    # 解析网页中的m3u8 url
+    m3u8_url, file = parse_m3u8_url(page_url)
+    # 下载m3u8视频
+    down_m3u8_video(m3u8_url, down_path, file, concurrency, tries)
 
 # 解析网页中的m3u8 url
 def parse_m3u8_url(page_url, file = None):
