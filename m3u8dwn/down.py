@@ -25,7 +25,7 @@ from pyutilb import log
 from asyncio import coroutines
 from urllib.parse import urlparse
 
-timeout = 50
+timeout = 30
 client = httpx.AsyncClient(verify=False, timeout=timeout) # 异步http client
 loop = asyncio.get_event_loop() # 异步io线程池
 
@@ -59,7 +59,7 @@ def load_m3u8(url):
             video = do_load_m3u8(url)
         else:
             log.debug("m3u8文件没有分片信息: " + url)
-    return video
+    return video, url
 
 # 真正的加载m3u8
 def do_load_m3u8(url):
@@ -69,7 +69,7 @@ def do_load_m3u8(url):
         log.error(f"直接加载m3u8报错: {e}")
         log.debug(f"先下载m3u8后解析: {url}")
         # 支持重定向
-        res = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+        res = httpx.get(url, headers=headers, verify=False, timeout=timeout, follow_redirects=True)
         check_response(res)
         video = m3u8.loads(res.text, url)
         if video.base_uri == None:
@@ -87,7 +87,7 @@ def get_key(keystr, url):
     key_url = keyinfo[uri_pos:quotation_mark_pos].split('"')[1]
     if is_url(key_url) == False:
         key_url = fix_ts_url(key_url, url)
-    res = httpx.get(key_url, headers=headers)
+    res = httpx.get(key_url, headers=headers, verify=False)
     check_response(res)
     key = res.content
     #keystr = key.decode('utf-8') # 偶尔会有编码错
@@ -261,7 +261,7 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
         os.mkdir(down_path)
 
     # 1 加载m3u8
-    video = load_m3u8(url)
+    video, url = load_m3u8(url) # url重新赋值，是因为有可能重定向
     na = len(video.segments)
     if na == 0:
         log.error(f"ts分片数为0，无法下载")
@@ -327,7 +327,7 @@ def parse_and_down_m3u8_video(page_url, down_path, concurrency, tries):
 def parse_m3u8_url(page_url, file = None):
     log.debug("解析网页中的m3u8 url: " + page_url)
     # 加载网页
-    res = httpx.get(page_url, headers=headers)
+    res = httpx.get(page_url, headers=headers, verify=False)
     check_response(res)
     html = res.content.decode("utf-8")
 
