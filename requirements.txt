@@ -1,4 +1,4 @@
-pyutilb >= 1.0.4
+pyutilb >= 1.0.5
 m3u8 >= 3.3.0
 pycrypto >= 2.6.1
 httpx >= 0.23.3
