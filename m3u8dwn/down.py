@@ -286,16 +286,23 @@ def down_m3u8_video(url, down_path, result_filename = 'result.mp4', concurrency 
         n = len(segs)  # 要下载的ts分片数
         round = math.ceil(n / concurrency)
         log.debug(f"第{i}次尝试: ts分片文件总数为{na}个, 已下载{na-n}个, 还要下载{n}个, 分{round}批下载, 每批并发下载{concurrency}个分片")
-        for start in range(0, n, concurrency):
-            log.debug(f"第{int(start/concurrency)+1}批下载")
-            end = min(start + concurrency, n)
-            batch_download_ts(segs[start:end], url, down_path, aes)
+        time.sleep(1)
+        # 尝试下载ts文件
+        #try_download_ts(segs, url, down_path, aes, concurrency, n) # 批次间要等待，上个批次下载完才能跑下个批次
+        try_download_ts2(segs, url, down_path, aes, concurrency, n) # 多批次可并发下载
 
     # 5 合并ts文件
     merge_to_mp4(result_filename, down_path, ts_list, True)
 
     times = time.time() - begin  # 记录完成时间
     log.debug(f"下载耗时: {times} s")
+
+# 尝试下载ts文件，多批次下载，批次间要等待，上个批次下载完才能跑下个批次
+def try_download_ts(segs, url, down_path, aes, concurrency, n):
+    for start in range(0, n, concurrency):
+        log.debug(f"第{int(start / concurrency) + 1}批下载")
+        end = min(start + concurrency, n)
+        batch_download_ts(segs[start:end], url, down_path, aes)
 
 # 批量异步下载ts文件，并等待下载完成
 # :param down_url ts文件地址
@@ -313,6 +320,33 @@ def batch_download_ts(segs, url, down_path, aes):
     if len(tasks) > 0:
         # 等待下载任务执行完成
         loop.run_until_complete(asyncio.wait(tasks))
+
+# 尝试下载ts文件，多批次可并发下载
+def try_download_ts2(segs, url, down_path, aes, concurrency, n):
+    tasks = []  # 下载任务
+    step = math.ceil(n / concurrency)
+    for start in range(0, n, step):
+        log.debug(f"第{int(start / step) + 1}批下载")
+        end = min(start + step, n)
+        task = batch_download_ts2(segs[start:end], url, down_path, aes)
+        if coroutines.iscoroutine(task):
+            tasks.append(task)
+
+    if len(tasks) > 0:
+        # 等待所有下载任务执行完成
+        loop.run_until_complete(asyncio.wait(tasks))
+
+# 批量异步下载ts文件
+#    batch_download_ts 是要等待下载完成
+#    batch_download_ts2 不等待，协程1下载完就紧接着协程2来下载，这样不用每次批量都等待，只需要搞一个总的等待，同时多批次可以并发下载
+# :param down_url ts文件地址
+# :param url *.m3u8文件地址
+# :param down_path 下载地址
+# :param aes aes加密器，为null则不加密
+async def batch_download_ts2(segs, url, down_path, aes):
+    for seg in segs:
+        # 启动下载任务
+        await download_ts(seg.uri, url, down_path, aes)
 
 # 从网页中解析m3u8地址，并下载视频
 # :param concurrency 并发下载数
